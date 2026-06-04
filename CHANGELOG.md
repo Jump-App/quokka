@@ -16,6 +16,10 @@ Quokka follows [Semantic Versioning](https://semver.org) and
 
 - Stop rewriting `with true <- x, do: body` to `if x, do: body`. That rewrite changed semantics: `with` returns the unmatched value (`false`, `:foo`, etc.) while `if` treats the head as truthy/falsey. Fixes [#187](https://github.com/emkguts/quokka/issues/187).
 
+### Fixes
+
+- Avoid `:deprecations` rules rewriting negative uses of `:timer.[units]/1` (`:timer.hours/1`, `:timer.minutes/1`, etc.). If there are negatives in literal values passed to `:timer.[units]/1`, we shouldn't rewrite it to use `to_timeout/1` since doing so will raise a runtime error (by definition, a timeout must be non-negative).
+
 ## [2.13.1] - 2026-05-19
 
 ### Fixes
