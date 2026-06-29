@@ -20,6 +20,7 @@ Quokka follows [Semantic Versioning](https://semver.org) and
 
 - Avoid `:deprecations` rules rewriting negative uses of `:timer.[units]/1` (`:timer.hours/1`, `:timer.minutes/1`, etc.). If there are negatives in literal values passed to `:timer.[units]/1`, we shouldn't rewrite it to use `to_timeout/1` since doing so will raise a runtime error (by definition, a timeout must be non-negative).
 - Add support for `Credo.Check.Refactor.FilterFilter`: consecutive `Enum.filter/2` (or `Stream.filter/2`) calls in a pipe are combined into a single filter. Two captures are joined with `&&` (e.g. `Enum.filter(&(&1.x > 0)) |> Enum.filter(&(&1.y < 0))` becomes `Enum.filter(&(&1.x > 0 && &1.y < 0))`); when an anonymous function is involved the predicates become an `if p1 do p2 else false end`. Enabled by adding the check to `.credo.exs`.
+- Added rewrite for `case` expressions that can be rewritten as `if`.
 
 ## [2.13.1] - 2026-05-19
 
