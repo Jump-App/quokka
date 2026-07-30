@@ -1629,6 +1629,31 @@ defmodule Quokka.Style.SingleNodeTest do
       )
     end
 
+    test "emits valid tuple AST when the reduction is nested in a map value" do
+      assert_style(
+        """
+        %{
+          type: "array",
+          items:
+            fields
+            |> Enum.reduce(%{}, fn field, items ->
+              Map.put(items, field.name, field_spec(field, opts))
+            end)
+        }
+        """,
+        """
+        %{
+          type: "array",
+          items:
+            fields
+            |> Map.new(fn field ->
+              {field.name, field_spec(field, opts)}
+            end)
+        }
+        """
+      )
+    end
+
     test "leaves a frequency counter whose value reads the accumulator" do
       assert_style("Enum.reduce(items, %{}, fn item, acc -> Map.put(acc, item.k, Map.get(acc, item.k, 0) + 1) end)")
     end

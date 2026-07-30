@@ -803,13 +803,13 @@ defmodule Quokka.Style.SingleNode do
          _item,
          acc,
          _stmts,
-         {{:., _, [{:__aliases__, _, [:Map]}, :put]}, _, [{acc, _, nil}, key, value]},
+         {{:., _, [{:__aliases__, _, [:Map]}, :put]}, call_meta, [{acc, _, nil}, key, value]},
          rebuild
        ) do
     with true <- map_empty?(init),
          false <- references_var?(key, acc),
          false <- references_var?(value, acc) do
-      {{[:Map], :new}, rebuild.({key, value})}
+      {{[:Map], :new}, rebuild.({:__block__, call_meta, [{key, value}]})}
     else
       _ -> nil
     end
