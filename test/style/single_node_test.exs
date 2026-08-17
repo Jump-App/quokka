@@ -1551,7 +1551,14 @@ defmodule Quokka.Style.SingleNodeTest do
       )
     end
 
-    test "rewrites expr + acc (operands flipped)" do
+    test "rewrites acc + expr into Enum.sum_by with more complex expression" do
+      assert_style(
+        "Enum.reduce(items, 0, fn item, acc -> acc + (item[\"amount\"] || 0) end)",
+        "Enum.sum_by(items, fn item -> item[\"amount\"] || 0 end)"
+      )
+    end
+
+    test "rewrites expr + acc into Enum.sum_by" do
       assert_style(
         "Enum.reduce(items, 0, fn item, acc -> item.count + acc end)",
         "Enum.sum_by(items, fn item -> item.count end)"

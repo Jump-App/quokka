@@ -786,8 +786,7 @@ defmodule Quokka.Style.SingleNode do
 
     with true <- sum_product_by_available?(),
          true <- literal?(init, identity),
-         {:ok, expr} <- accumulator_partner(a, b, acc),
-         false <- references_var?(expr, acc),
+         {:ok, expr} <- extract_non_accumulator_operand(a, b, acc),
          false <- same_variable?(expr, item),
          false <- literal_constant?(expr) do
       {{[:Enum], enum_fn_name}, rebuild.(expr)}
@@ -849,9 +848,15 @@ defmodule Quokka.Style.SingleNode do
   defp join_reduce_body([], last), do: last
   defp join_reduce_body(statements, last), do: {:__block__, [], statements ++ [last]}
 
-  defp accumulator_partner({acc, _, nil}, other, acc), do: {:ok, other}
-  defp accumulator_partner(other, {acc, _, nil}, acc), do: {:ok, other}
-  defp accumulator_partner(_a, _b, _acc), do: :error
+  defp extract_non_accumulator_operand({acc, _, nil}, other, acc) do
+    if references_var?(other, acc), do: :error, else: {:ok, other}
+  end
+
+  defp extract_non_accumulator_operand(other, {acc, _, nil}, acc) do
+    if references_var?(other, acc), do: :error, else: {:ok, other}
+  end
+
+  defp extract_non_accumulator_operand(_a, _b, _acc), do: :error
 
   defp counts_by_one?([{{:__block__, _, [:do]}, do_branch}, {{:__block__, _, [:else]}, else_branch}], acc) do
     increments_by_one?(do_branch, acc) and match?({^acc, _, nil}, else_branch)
