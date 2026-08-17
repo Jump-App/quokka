@@ -1924,9 +1924,14 @@ defmodule Quokka.Style.PipesTest do
     end
 
     test "preserves an existing `and` inside a combined capture" do
+      expected =
+        "a |> Enum.filter(&((&1 > 0 and &1 < 10) && &1 != 5)) |> bar()"
+        |> Code.format_string!()
+        |> IO.iodata_to_binary()
+
       assert_style(
         "a |> Enum.filter(&(&1 > 0 and &1 < 10)) |> Enum.filter(&(&1 != 5)) |> bar()",
-        "a |> Enum.filter(&((&1 > 0 and &1 < 10) && &1 != 5)) |> bar()"
+        expected
       )
     end
 

@@ -723,7 +723,8 @@ defmodule Quokka.Style.Pipes do
 
     with {:ok, cond_ast} <- predicate_as_expr(c1, param, :condition),
          {:ok, then_ast} <- predicate_as_expr(c2, param, :body) do
-      if_ast = {:if, [line: line], [cond_ast, [do: then_ast, else: false]]}
+      false_ast = {:__block__, [line: line], [false]}
+      if_ast = {:if, [line: line], [cond_ast, [do: then_ast, else: false_ast]]}
       fn_ast = {:fn, [line: line], [{:->, [line: line], [[{param, [line: line], nil}], if_ast]}]}
       Style.set_line(fn_ast, line)
     else
