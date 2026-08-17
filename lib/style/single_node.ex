@@ -782,7 +782,7 @@ defmodule Quokka.Style.SingleNode do
   # `Enum.reduce(enum, 0, fn item, acc -> acc + expr end)` => `Enum.sum_by(enum, fn item -> expr end)`
   # `Enum.reduce(enum, 1, fn item, acc -> acc * expr end)` => `Enum.product_by(enum, fn item -> expr end)`
   defp classify_reduce(init, item, acc, _stmts, {op, _, [a, b]}, rebuild) when op in [:+, :*] do
-    identity = if op == :+, do: 0, else: 1
+    {identity, enum_fn_name} = if op == :+, do: {0, :sum_by}, else: {1, :product_by}
 
     with true <- sum_product_by_available?(),
          true <- literal?(init, identity),
@@ -790,8 +790,7 @@ defmodule Quokka.Style.SingleNode do
          false <- references_var?(expr, acc),
          false <- same_variable?(expr, item),
          false <- literal_constant?(expr) do
-      name = if op == :+, do: :sum_by, else: :product_by
-      {{[:Enum], name}, rebuild.(expr)}
+      {{[:Enum], enum_fn_name}, rebuild.(expr)}
     else
       _ -> nil
     end
