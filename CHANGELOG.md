@@ -11,6 +11,10 @@ Quokka follows [Semantic Versioning](https://semver.org) and
 - Fold a non-piped `Kernel` operator call back into an inline expression (e.g. `Kernel./(total, size)` becomes `total / size`, `Kernel.-(x)` becomes `-x`). This applies to all `Kernel` infix/unary operators, while operators in pipe position are left to the pipe-folding rewrite above.
 - Added rewrite for `Enum.reduce/3` when it can be replaced by a function from `Enum` module or `Map.new`
 
+### Fixes
+
+- Do not rewrite direct `assert` or `refute` calls from `Repo.one(query)` to `Repo.exists?(query)` when the query is held in a variable, because it may select `false` or `nil` and change the test result.
+
 ## [2.13.1] - 2026-05-19
 
 ### Fixes
