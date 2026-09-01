@@ -33,8 +33,18 @@ defmodule Quokka.Config.Credo do
   defp checks() do
     case read_config().checks do
       checks when is_list(checks) -> checks
-      checks -> Map.get(checks, :enabled, [])
+      checks when is_map(checks) -> merge_checks(checks)
+      _ -> []
     end
+  end
+
+  defp merge_checks(checks) do
+    enabled = %Credo.ConfigFile{checks: %{enabled: Map.get(checks, :enabled) || []}}
+    disabled = %Credo.ConfigFile{checks: %{disabled: Map.get(checks, :disabled) || []}}
+
+    enabled
+    |> Credo.ConfigFile.merge_checks(disabled)
+    |> Map.fetch!(:enabled)
   end
 
   defp read_config() do
