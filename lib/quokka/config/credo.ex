@@ -94,7 +94,7 @@ defmodule Quokka.Config.Credo do
   end
 
   defp apply_check({NegatedConditionsWithElse, false}, acc) do
-    Map.put(acc, :negated_conditions_with_else, true)
+    Map.put(acc, :negated_conditions_with_else, false)
   end
 
   defp apply_check({OnePipePerLine, opts}, acc) when is_list(opts) do
