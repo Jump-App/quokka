@@ -1,12 +1,13 @@
 defmodule Quokka.ConfigTest do
-  use ExUnit.Case, async: false
+  use Quokka.StyleCase, async: false
   use Mimic
 
   import Quokka.Config
-  import Quokka.StyleCase, only: [style: 1]
 
   alias Credo.Check.Design.AliasUsage
   alias Credo.Check.Readability.MaxLineLength
+  alias Credo.Check.Readability.MultiAlias
+  alias Credo.Check.Refactor.CondStatements
   alias Quokka.Style.Autosort
   alias Quokka.Style.CommentDirectives
   alias Quokka.Style.Configs
@@ -102,6 +103,29 @@ defmodule Quokka.ConfigTest do
     assert Quokka.Config.get(:line_length) == 200
   end
 
+  test "disabling CondStatements in Credo disables the rewrite and preserves cond statements" do
+    stub_credo_checks(%{
+      enabled: [],
+      disabled: [{CondStatements, []}]
+    })
+
+    assert :ok = set!([])
+
+    refute Quokka.Config.cond_statements?()
+    assert_style("cond do\n  a -> b\n  true -> c\nend")
+  end
+
+  test "disabled Credo checks override entries in the enabled section" do
+    stub_credo_checks(%{
+      enabled: [{MultiAlias, []}],
+      disabled: [{MultiAlias, []}]
+    })
+
+    assert :ok = set!([])
+
+    refute Quokka.Config.rewrite_multi_alias?()
+  end
+
   test "parses autosort in both formats" do
     assert :ok = set!(quokka: [autosort: [:map, schema: [:field, :belongs_to]]])
     assert [:map, :schema] == Quokka.Config.autosort()
@@ -161,5 +185,11 @@ defmodule Quokka.ConfigTest do
   test "falls back to System.version() when elixir_version is not set" do
     assert :ok = Quokka.Config.set!([])
     assert System.version() == Quokka.Config.elixir_version()
+  end
+
+  defp stub_credo_checks(checks) do
+    Mimic.expect(Credo.ConfigFile, :read_or_default, fn _, _ ->
+      {:ok, %Credo.ConfigFile{checks: checks}}
+    end)
   end
 end
