@@ -128,16 +128,11 @@ defmodule Quokka.ConfigTest do
   end
 
   test "does not rewrite negated conditions when Credo disables the check" do
-    Mimic.expect(Credo.ConfigFile, :read_or_default, fn _, _ ->
-      {:ok, %{checks: %{enabled: [{NegatedConditionsWithElse, false}]}}}
-    end)
+    stub_credo_checks(%{enabled: [{NegatedConditionsWithElse, false}]})
 
     assert :ok = set!([])
 
-    source = "if !foo, do: :bar, else: :baz"
-    {_, styled, _} = style(source)
-
-    assert styled == source
+    assert_style("if !foo, do: :bar, else: :baz")
   end
 
   test "parses autosort in both formats" do
