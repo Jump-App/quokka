@@ -8,6 +8,7 @@ defmodule Quokka.ConfigTest do
   alias Credo.Check.Readability.MaxLineLength
   alias Credo.Check.Readability.MultiAlias
   alias Credo.Check.Refactor.CondStatements
+  alias Credo.Check.Refactor.NegatedConditionsWithElse
   alias Quokka.Style.Autosort
   alias Quokka.Style.CommentDirectives
   alias Quokka.Style.Configs
@@ -124,6 +125,14 @@ defmodule Quokka.ConfigTest do
     assert :ok = set!([])
 
     refute Quokka.Config.rewrite_multi_alias?()
+  end
+
+  test "does not rewrite negated conditions when Credo disables the check" do
+    stub_credo_checks(%{enabled: [{NegatedConditionsWithElse, false}]})
+
+    assert :ok = set!([])
+
+    assert_style("if !foo, do: :bar, else: :baz")
   end
 
   test "parses autosort in both formats" do
