@@ -1,9 +1,8 @@
 defmodule Quokka.ConfigTest do
-  use ExUnit.Case, async: false
+  use Quokka.StyleCase, async: false
   use Mimic
 
   import Quokka.Config
-  import Quokka.StyleCase, only: [style: 1]
 
   alias Credo.Check.Design.AliasUsage
   alias Credo.Check.Readability.MaxLineLength
@@ -113,11 +112,7 @@ defmodule Quokka.ConfigTest do
     assert :ok = set!([])
 
     refute Quokka.Config.cond_statements?()
-
-    source = "cond do\n  a -> b\n  true -> c\nend"
-    {_, styled, _} = style(source)
-
-    assert styled == source
+    assert_style("cond do\n  a -> b\n  true -> c\nend")
   end
 
   test "disabled Credo checks override entries in the enabled section" do
