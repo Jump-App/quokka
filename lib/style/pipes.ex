@@ -468,6 +468,24 @@ defmodule Quokka.Style.Pipes do
     {:|>, pm, [lhs, rhs]}
   end
 
+  # `list |> Enum.map(mapper) |> Enum.sum()` => `list |> Enum.sum_by(mapper)`
+  defp fix_pipe(
+         pipe_chain(
+           pm,
+           lhs,
+           {{:., dm, [{_, _, [mod]}, :map]}, em, [mapper]},
+           {{:., _, [{_, _, [:Enum]} = enum, :sum]}, _, []}
+         ) = node
+       )
+       when mod in @enum do
+    if Quokka.Config.inefficient_function_rewrites?() and
+         Version.match?(Quokka.Config.elixir_version(), ">= 1.18.0-dev") do
+      {:|>, pm, [lhs, {{:., dm, [enum, :sum_by]}, em, [mapper]}]}
+    else
+      node
+    end
+  end
+
   for m <- [:Map, :Keyword] do
     # `lhs |> Map/Keyword.delete(key1) |> Map/Keyword.delete(key2)` => `lhs |> Map/Keyword.drop([key1, key2])`
     defp fix_pipe(
