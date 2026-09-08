@@ -469,18 +469,20 @@ defmodule Quokka.Style.Pipes do
   end
 
   # `list |> Enum.map(mapper) |> Enum.sum()` => `list |> Enum.sum_by(mapper)`
+  # `list |> Enum.map(mapper) |> Enum.product()` => `list |> Enum.product_by(mapper)`
   defp fix_pipe(
          pipe_chain(
            pm,
            lhs,
            {{:., dm, [{_, _, [mod]}, :map]}, em, [mapper]},
-           {{:., _, [{_, _, [:Enum]} = enum, :sum]}, _, []}
+           {{:., _, [{_, _, [:Enum]} = enum, aggregate]}, _, []}
          ) = node
        )
-       when mod in @enum do
+       when mod in @enum and aggregate in [:sum, :product] do
     if Quokka.Config.inefficient_function_rewrites?() and
          Version.match?(Quokka.Config.elixir_version(), ">= 1.18.0-dev") do
-      {:|>, pm, [lhs, {{:., dm, [enum, :sum_by]}, em, [mapper]}]}
+      aggregate_by = if aggregate == :sum, do: :sum_by, else: :product_by
+      {:|>, pm, [lhs, {{:., dm, [enum, aggregate_by]}, em, [mapper]}]}
     else
       node
     end

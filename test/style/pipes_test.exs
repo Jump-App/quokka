@@ -1402,6 +1402,95 @@ defmodule Quokka.Style.PipesTest do
       end
     end
 
+    test "map/product rewrites Enum.map and Stream.map followed by Enum.product" do
+      enable_product_by_rewrite()
+
+      for enum <- ~w(Enum Stream) do
+        assert_style(
+          "a |> #{enum}.map(mapper) |> Enum.product()",
+          "Enum.product_by(a, mapper)"
+        )
+      end
+    end
+
+    test "map/product rewrites within a longer pipe chain" do
+      enable_product_by_rewrite()
+
+      assert_style(
+        "mapping |> Map.values() |> Enum.map(& &1.quantity) |> Enum.product()",
+        "mapping |> Map.values() |> Enum.product_by(& &1.quantity)"
+      )
+
+      assert_style(
+        "items |> Enum.map(mapper) |> Enum.product() |> IO.inspect()",
+        "items |> Enum.product_by(mapper) |> IO.inspect()"
+      )
+    end
+
+    test "map/product preserves a multiline mapper and its comments" do
+      enable_product_by_rewrite()
+
+      assert_style(
+        """
+        items
+        |> Enum.map(fn item ->
+          # Default missing quantities.
+          item.quantity || 1
+        end)
+        |> Enum.product()
+        """,
+        """
+        Enum.product_by(items, fn item ->
+          # Default missing quantities.
+          item.quantity || 1
+        end)
+        """
+      )
+    end
+
+    test "map/product does not rewrite calls to other modules" do
+      enable_product_by_rewrite()
+
+      assert_style("items |> Other.map(mapper) |> Enum.product()")
+      assert_style("items |> Enum.map(mapper) |> Other.product()")
+    end
+
+    test "map/product does not rewrite before Enum.product_by/2 is available" do
+      stub(Quokka.Config, :elixir_version, fn -> "1.17.3" end)
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style("items |> Enum.map(mapper) |> Enum.product()")
+    end
+
+    test "map/product respects the inefficient_functions exclusion" do
+      stub(Quokka.Config, :elixir_version, fn -> "1.18.0" end)
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> false end)
+
+      assert_style("items |> Enum.map(mapper) |> Enum.product()")
+    end
+
+    test "map/product preserves results for numeric mapper outputs" do
+      if Version.match?(System.version(), ">= 1.18.0-dev") do
+        enable_product_by_rewrite()
+
+        source = "items |> Enum.map(& &1.quantity) |> Enum.product()"
+        {_, styled, _} = style(source)
+
+        for items <- [
+              [],
+              [%{quantity: 0}],
+              [%{quantity: 1}, %{quantity: 2}, %{quantity: 3}],
+              [%{quantity: -2}, %{quantity: 3}, %{quantity: 4}],
+              [%{quantity: 2}, %{quantity: 2.5}, %{quantity: -0.5}]
+            ] do
+          {original_result, _binding} = Code.eval_string(source, items: items)
+          {styled_result, _binding} = Code.eval_string(styled, items: items)
+
+          assert styled_result == original_result
+        end
+      end
+    end
+
     test "map/into" do
       for enum <- ~w(Enum Stream) do
         assert_style("a|> #{enum}.map(b)|> Enum.into(%{})", "Map.new(a, b)")
@@ -1883,6 +1972,11 @@ defmodule Quokka.Style.PipesTest do
   end
 
   defp enable_sum_by_rewrite() do
+    stub(Quokka.Config, :elixir_version, fn -> "1.18.0" end)
+    stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+  end
+
+  defp enable_product_by_rewrite() do
     stub(Quokka.Config, :elixir_version, fn -> "1.18.0" end)
     stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
   end
