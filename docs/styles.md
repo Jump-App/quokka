@@ -227,6 +227,24 @@ baz |> Enum.reverse() |> Enum.concat(bop)
 Enum.reverse(baz, bop)
 ```
 
+### Nested `Enum.map/2` and aggregation -> `Enum.sum_by/2` or `Enum.product_by/2`
+
+On Elixir 1.18+, Quokka collapses nested `Enum.map/2` or `Stream.map/2` calls
+consumed by `Enum.sum/1` or `Enum.product/1` into the purpose-built aggregate.
+For `Enum.map/2`, this also avoids allocating an intermediate list.
+
+```elixir
+# Before
+Enum.sum(Enum.map(groups, fn group -> length(group.rows) end))
+# Styled
+Enum.sum_by(groups, fn group -> length(group.rows) end)
+
+# Before
+Enum.product(Enum.map(groups, fn group -> length(group.rows) end))
+# Styled
+Enum.product_by(groups, fn group -> length(group.rows) end)
+```
+
 ### `Enum.reduce` rewrites to purpose-built functions
 
 Quokka rewrites `Enum.reduce/2,3` calls whose reducer simply adds the two arguments to `Enum.sum/1`. This covers anonymous functions (with operands in either order), `&(&1 + &2)` captures, and `&+/2` / `&Kernel.+/2` captures. For `Enum.reduce/3`, the accumulator must be the literal integer `0` (so `0.0` is left alone to preserve float typing on empty enums). This holds in pipe position too: `enum |> Enum.reduce(acc, &+/2)` with a non-zero accumulator is left unchanged.

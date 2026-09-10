@@ -1537,6 +1537,64 @@ defmodule Quokka.Style.SingleNodeTest do
     end
   end
 
+  describe "Enum.sum/product(Enum.map/Stream.map) => Enum.sum_by/product_by" do
+    setup do
+      stub(Quokka.Config, :elixir_version, fn -> "1.18.0" end)
+      :ok
+    end
+
+    test "rewrites nested map and aggregate calls" do
+      for {aggregate, aggregate_by} <- [sum: :sum_by, product: :product_by],
+          mapper_module <- ~w(Enum Stream) do
+        assert_style(
+          "Enum.#{aggregate}(#{mapper_module}.map(groups, fn g -> length(g.rows) end))",
+          "Enum.#{aggregate_by}(groups, fn g -> length(g.rows) end)"
+        )
+      end
+    end
+
+    test "preserves a multiline mapper and its comments" do
+      assert_style(
+        """
+        Enum.sum(
+          Enum.map(groups, fn group ->
+            # Count every row in the group.
+            length(group.rows)
+          end)
+        )
+        """,
+        """
+        Enum.sum_by(
+          groups,
+          fn group ->
+            # Count every row in the group.
+            length(group.rows)
+          end
+        )
+        """
+      )
+    end
+
+    test "does not rewrite calls to other modules" do
+      assert_style("Other.sum(Enum.map(groups, mapper))")
+      assert_style("Enum.sum(Other.map(groups, mapper))")
+    end
+
+    test "does not rewrite before Enum.sum_by/2 is available" do
+      stub(Quokka.Config, :elixir_version, fn -> "1.17.3" end)
+
+      assert_style("Enum.sum(Enum.map(groups, mapper))")
+      assert_style("Enum.product(Enum.map(groups, mapper))")
+    end
+
+    test "respects inefficient_functions config" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> false end)
+
+      assert_style("Enum.sum(Enum.map(groups, mapper))")
+      assert_style("Enum.product(Enum.map(groups, mapper))")
+    end
+  end
+
   describe "Enum.reduce => Enum.sum_by/product_by" do
     setup do
       stub(Quokka.Config, :elixir_version, fn -> "1.18.0" end)

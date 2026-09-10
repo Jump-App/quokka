@@ -373,6 +373,22 @@ defmodule Quokka.Style.SingleNode do
   defp style({:++, _, [{{:., _, [{_, _, [:Enum]}, :reverse]} = reverse, r_meta, [lhs]}, rhs]}),
     do: {reverse, r_meta, [lhs, rhs]}
 
+  # `Enum.sum(Enum.map(enum, mapper))` => `Enum.sum_by(enum, mapper)`
+  # `Enum.product(Enum.map(enum, mapper))` => `Enum.product_by(enum, mapper)`
+  # The same rewrite applies to a lazy Stream.map/2 input.
+  defp style(
+         {{:., dm, [{:__aliases__, am, [:Enum]}, aggregate]}, m,
+          [{{:., _, [{:__aliases__, _, [mapper_module]}, :map]}, _, [enum, mapper]}]} = node
+       )
+       when aggregate in [:sum, :product] and mapper_module in [:Enum, :Stream] do
+    if Quokka.Config.inefficient_function_rewrites?() and sum_product_by_available?() do
+      aggregate_by = if aggregate == :sum, do: :sum_by, else: :product_by
+      {{:., dm, [{:__aliases__, am, [:Enum]}, aggregate_by]}, m, [enum, mapper]}
+    else
+      node
+    end
+  end
+
   # `Enum.reduce(enum, 0, fn x, acc -> x + acc end)` => `Enum.sum(enum)`
   # Also folds richer reducers into the purpose-built `Enum`/`Map` function the reduction is really
   # performing (`Enum.sum_by`, `Enum.product_by`, `Map.new`, `Enum.count`, `Enum.map`)
