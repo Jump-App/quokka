@@ -2331,10 +2331,10 @@ defmodule Quokka.Style.PipesTest do
       )
     end
 
-    test "preserves an existing `and` inside a combined capture" do
+    test "preserves an existing `or` inside a combined capture" do
       assert_style(
-        "a |> Enum.filter(&(&1 > 0 and &1 < 10)) |> Enum.filter(&(&1 != 5)) |> bar()",
-        "a |> Enum.filter(&((&1 > 0 and &1 < 10) && &1 != 5)) |> bar()"
+        "a |> Enum.filter(&(&1 > 0 or &1 < 10)) |> Enum.filter(&(&1 != 5)) |> bar()",
+        "a |> Enum.filter(&((&1 > 0 or &1 < 10) && &1 != 5)) |> bar()"
       )
     end
 
