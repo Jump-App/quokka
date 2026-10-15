@@ -218,9 +218,10 @@ defmodule Quokka.Style.BlocksTest do
         end
         """,
         """
-        case x do
-          true -> :bar
-          _ -> :error
+        if x do
+          :bar
+        else
+          :error
         end
         """
       )
