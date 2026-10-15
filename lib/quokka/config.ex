@@ -161,6 +161,7 @@ defmodule Quokka.Config do
     :pipe_into_case,
     :refactor_pipe_chain_starts,
     :rewrite_multi_alias,
+    :sigils,
     :single_pipe_flag,
     :utc_now_truncate,
     :zero_arity_parens
