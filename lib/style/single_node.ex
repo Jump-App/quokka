@@ -63,6 +63,10 @@ defmodule Quokka.Style.SingleNode do
   @kernel_unary_ops [:-, :+, :!, :not]
   @kernel_binary_ops @kernel_ops -- [:!, :not]
 
+  # Special forms (`<<>>`, `{}`, `%{}`, `^`, `for`, `with`, etc.) can't be captured by name,
+  # so `&<<&1>>` must not become `&<<>>/1`.
+  @special_forms Kernel.SpecialForms.__info__(:macros) |> Keyword.keys() |> Enum.uniq()
+
   # `|> Timex.now()` => `|> Timex.now()`
   # skip over pipes into `Timex.now/1` so that we don't accidentally rewrite it as DateTime.utc_now/1
   def run({{:|>, _, [_, {{:., _, [{:__aliases__, _, [:Timex]}, :now]}, _, []}]}, _} = zipper, ctx),
@@ -672,11 +676,11 @@ defmodule Quokka.Style.SingleNode do
   end
 
   defp style({:&, meta, [{fun, fun_meta, [{:&, _, [arg_num]}]}]} = node) when is_integer(arg_num) do
-    # Don't rewrite when the call target is an anonymous arg (e.g. `& &1.run(&2)`),
-    # which can't be expressed as a function capture.
+    # Don't rewrite when the call target is an anonymous arg (e.g. `& &1.run(&2)`)
+    # or a special form (e.g. `&<<&1>>`), neither of which can be expressed as a function capture.
     capture_target =
       case fun do
-        name when is_atom(name) ->
+        name when is_atom(name) and name not in @special_forms ->
           {name, fun_meta, Elixir}
 
         {:., _, [{:&, _, [_]}, _method]} ->
@@ -815,7 +819,18 @@ defmodule Quokka.Style.SingleNode do
   defp repo_one_to_exists(node), do: node
 
   # Ecto.Query macros that don't change what a query selects
-  @select_preserving_query_macros ~w(where or_where join order_by limit offset preload distinct first last)a
+  @select_preserving_query_macros [
+    :where,
+    :or_where,
+    :join,
+    :order_by,
+    :limit,
+    :offset,
+    :preload,
+    :distinct,
+    :first,
+    :last
+  ]
 
   # True when the query is a schema module (`User`), or is built from one with `from` and the macros above,
   # with no `select` or `select_merge`. Variables and other function calls may hide a `select`, so we can't

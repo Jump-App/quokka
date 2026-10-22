@@ -90,10 +90,12 @@ defmodule Quokka.Style.SingleNodeTest do
       assert_style "Kernel.*(Kernel.-(a, b), c)", "(a - b) * c"
     end
 
-    test "leaves a piped Kernel operator alone (the Pipes style owns those)" do
-      # later in a chain the operand count differs and folding would change semantics
-      assert_style "a |> b() |> Kernel.++(c)"
-      assert_style "a |> b() |> Kernel.-(c)"
+    test "lets the Pipes style own piped Kernel operators" do
+      assert_style "a |> b() |> Kernel.++(c)", "b(a) ++ c"
+      assert_style "a |> b() |> Kernel.-(c)", "b(a) - c"
+
+      # A non-terminal operator in a longer chain is still left alone.
+      assert_style "a |> b() |> Kernel.++(c) |> d()"
     end
   end
 
@@ -1473,6 +1475,20 @@ defmodule Quokka.Style.SingleNodeTest do
       assert_style("Enum.reduce(actions, 0, & &1.run/2)")
       assert_style("Enum.reduce(actions, state, & &1.run(&2))")
       assert_style("Enum.reduce(actions, state, & &1.run(&1, &2))")
+    end
+
+    test "does not rewrite captures of special forms" do
+      assert_style("Enum.map(xs, &<<&1>>)")
+      assert_style("Enum.map(xs, &{&1})")
+      assert_style("Enum.map(xs, &<<&1::utf8>>)")
+      assert_style("Enum.map(xs, &{&1, &2})")
+      assert_style("Enum.map(xs, &[&1])")
+      assert_style("Enum.map(xs, &%{a: &1})")
+    end
+
+    test "still rewrites captures of Kernel macros and operators" do
+      assert_style("Enum.map(xs, &to_string(&1))", "Enum.map(xs, &to_string/1)")
+      assert_style("Enum.map(xs, &is_nil(&1))", "Enum.map(xs, &is_nil/1)")
     end
   end
 
