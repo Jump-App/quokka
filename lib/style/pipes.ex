@@ -34,6 +34,7 @@ defmodule Quokka.Style.Pipes do
 
   @collectable [:Map, :Keyword, :MapSet]
   @enum [:Enum, :Stream]
+  @uncapturable Enum.uniq(Keyword.keys(Kernel.SpecialForms.__info__(:macros)) ++ Keyword.keys(Kernel.__info__(:macros)))
 
   # most of these values were lifted directly from credo's pipe_chain_start.ex
   @literal [:__block__, :__aliases__, :unquote]
@@ -372,6 +373,10 @@ defmodule Quokka.Style.Pipes do
     end
   end
 
+  defguardp is_length(fun)
+            when fun == :length or
+                   (elem(fun, 0) == :. and elem(hd(elem(fun, 2)), 2) == [:Kernel] and tl(elem(fun, 2)) == [:length])
+
   # `pipe_chain(a, b, c)` generates the ast for `a |> b |> c`
   # the intention is to make it a little easier to see what the fix_pipe functions are matching on =)
   defmacrop pipe_chain(pm, a, b, c) do
@@ -379,7 +384,8 @@ defmodule Quokka.Style.Pipes do
   end
 
   # a |> fun => a |> fun()
-  defp fix_pipe({:|>, m, [lhs, {fun, m2, nil}]}), do: {:|>, m, [lhs, {fun, m2, []}]}
+  # recurses so that other rewrites see the parenthesized call in a single pass
+  defp fix_pipe({:|>, m, [lhs, {fun, m2, nil}]}), do: fix_pipe({:|>, m, [lhs, {fun, m2, []}]})
 
   # a |> then(&fun(&1, d)) |> c => a |> fun(d) |> c()
   defp fix_pipe({:|>, m, [lhs, {:then, _, [{:&, _, [{fun, m2, [{:&, _, _} | args]}]}]}]} = pipe) do
@@ -469,7 +475,14 @@ defmodule Quokka.Style.Pipes do
     {:|>, pm, [lhs, {reverse, [line: meta[:line]], [enum]}]}
   end
 
-  # `lhs |> Enum.filter(filterer) |> Enum.count()` => `lhs |> Enum.count(count)`
+  # `lhs |> Enum.filter(filterer) |> length()` => `lhs |> Enum.count(filterer)`
+  # `lhs |> Enum.filter(filterer) |> Kernel.length()` => `lhs |> Enum.count(filterer)`
+  defp fix_pipe(pipe_chain(pm, lhs, {{:., dm, [{_, _, [:Enum]} = enum, :filter]}, meta, [filterer]}, {length, _, []}))
+       when is_length(length) do
+    {:|>, pm, [lhs, {{:., dm, [enum, :count]}, [line: meta[:line]], [filterer]}]}
+  end
+
+  # `lhs |> Enum.filter(filterer) |> Enum.count()` => `lhs |> Enum.count(filterer)`
   defp fix_pipe(
          pipe_chain(
            pm,
@@ -552,6 +565,26 @@ defmodule Quokka.Style.Pipes do
        when mod in @enum do
     rhs = {{:., dm, [enum, :map_join]}, em, Style.set_line(join_args, dm[:line]) ++ map_args}
     {:|>, pm, [lhs, rhs]}
+  end
+
+  # `lhs |> Enum.zip(other) |> Enum.map(fn {a, b} -> f(a, b) end)` => `lhs |> Enum.zip_with(other, &f/2)`
+  # `lhs |> Enum.zip(other) |> Enum.map(fn {a, b} -> body end)` => `lhs |> Enum.zip_with(other, fn a, b -> body end)`
+  defp fix_pipe(
+         pipe_chain(
+           pm,
+           lhs,
+           {{:., _, [{_, _, [:Enum]}, :zip]}, _, [other]},
+           {{:., dm, [{_, _, [:Enum]} = enum, :map]}, mm, [{:fn, fn_meta, arrows}]}
+         ) = node
+       ) do
+    with true <- Quokka.Config.inefficient_function_rewrites?(),
+         {:ok, arrows} <- untuple_zip_arrows(arrows) do
+      zipper_fun = zip_with_capture(arrows, fn_meta) || {:fn, fn_meta, arrows}
+      other = Style.set_line(other, dm[:line])
+      {:|>, pm, [lhs, {{:., dm, [enum, :zip_with]}, mm, [other, zipper_fun]}]}
+    else
+      _ -> node
+    end
   end
 
   # `map |> Map.values() |> Enum.sum_by(mapper)`
@@ -862,6 +895,40 @@ defmodule Quokka.Style.Pipes do
       node -> node
     end)
   end
+
+  defp untuple_zip_arrows(arrows) do
+    arrows = Enum.map(arrows, &untuple_zip_arrow/1)
+    if :error in arrows, do: :error, else: {:ok, arrows}
+  end
+
+  defp untuple_zip_arrow({:->, am, [[{:when, wm, [{:__block__, _, [{a, b}]} | guards]}], body]}),
+    do: {:->, am, [[{:when, wm, [a, b | guards]}], body]}
+
+  defp untuple_zip_arrow({:->, am, [[{:__block__, _, [{a, b}]}], body]}), do: {:->, am, [[a, b], body]}
+  defp untuple_zip_arrow(_arrow), do: :error
+
+  defp zip_with_capture([{:->, _, [[{a, _, ac}, {b, _, bc}], {fun, fun_meta, [{a, _, ac2}, {b, _, bc2}]}]}], fn_meta)
+       when a != b and is_atom(a) and is_atom(b) and is_atom(ac) and is_atom(bc) and is_atom(ac2) and is_atom(bc2) do
+    capture_target =
+      case fun do
+        name when is_atom(name) ->
+          if name not in @uncapturable and not Macro.operator?(name, 2), do: {name, fun_meta, nil}
+
+        {:., dot_meta, [{:__aliases__, _, _} = module, name]} when is_atom(name) ->
+          {{:., dot_meta, [module, name]}, [no_parens: true] ++ Keyword.take(fun_meta, [:line]), []}
+
+        _ ->
+          nil
+      end
+
+    if capture_target do
+      line_meta = Keyword.take(fn_meta, [:line])
+      arity = {:__block__, Keyword.put(line_meta, :token, "2"), [2]}
+      {:&, line_meta, [{:/, line_meta, [capture_target, arity]}]}
+    end
+  end
+
+  defp zip_with_capture(_arrows, _fn_meta), do: nil
 
   defp safely_closable_mapper?({name, _, context}) when is_atom(name) and (is_atom(context) or is_nil(context)),
     do: true

@@ -7,12 +7,14 @@ Quokka follows [Semantic Versioning](https://semver.org) and
 
 ### Improvements
 
+- Rewrite `Enum.filter/2` piped into `length/1` or `Kernel.length/1` to `Enum.count/2`.
 - Fold a `Kernel` operator that starts a pipe back into an inline expression (e.g. `foo |> Kernel.||(bar) |> Enum.map(...)` becomes `(foo || bar) |> Enum.map(...)`). This applies to all `Kernel` infix/unary operators (`++`, `||`, `<>`, `/`, `-`, etc.), but only when the operator is the very first function in the pipe.
 - Fold a non-piped `Kernel` operator call back into an inline expression (e.g. `Kernel./(total, size)` becomes `total / size`, `Kernel.-(x)` becomes `-x`). This applies to all `Kernel` infix/unary operators, while operators in pipe position are left to the pipe-folding rewrite above.
 - Added rewrite for `Enum.reduce/3` when it can be replaced by a function from `Enum` module or `Map.new`
 - Support disabling Credo check via `:disabled` section of the configuration
 - Rewrite `Enum.map/2` or `Stream.map/2` followed by `Enum.sum/1` or `Enum.product/1` to `Enum.sum_by/2` or `Enum.product_by/2` on Elixir 1.18+; fuse a preceding `Map.values/1` into the aggregate function.
 - Rewrite `~w` sigils to literal lists (e.g. `~w(foo bar)a` becomes `[:foo, :bar]`). Sigils with interpolation or escape sequences are left alone. Disable it with `exclude: [:sigils]`.
+- Rewrite `Enum.zip/2` followed by `Enum.map/2` with a 2-tuple-destructuring mapper to `Enum.zip_with/3` (e.g. `a |> Enum.zip(b) |> Enum.map(fn {x, y} -> f(x, y) end)` becomes `Enum.zip_with(a, b, &f/2)`). Disable it with `exclude: [:inefficient_functions]`.
 
 ### Fixes
 

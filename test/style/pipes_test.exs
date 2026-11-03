@@ -1292,6 +1292,53 @@ defmodule Quokka.Style.PipesTest do
       end
     end
 
+    test "filter/length" do
+      for counter <- ["length()", "Kernel.length()", "length", "Kernel.length"] do
+        assert_style(
+          "a |> Enum.filter(fun) |> #{counter}",
+          "Enum.count(a, fun)"
+        )
+
+        assert_style(
+          "a |> Enum.filter(fun) |> #{counter} |> IO.puts()",
+          "a |> Enum.count(fun) |> IO.puts()"
+        )
+
+        assert_style(
+          "a |> b() |> Enum.filter(fun) |> #{counter}",
+          "a |> b() |> Enum.count(fun)"
+        )
+
+        # Stream.filter returns a stream, which length/1 cannot count.
+        assert_style(
+          "a |> Stream.filter(fun) |> #{counter}",
+          "a |> Stream.filter(fun) |> #{String.trim_trailing(counter, "()")}()"
+        )
+      end
+
+      assert_style("a |> Enum.filter(fun) |> MyModule.length()")
+      assert_style("a |> Enum.filter(fun) |> MyModule.length", "a |> Enum.filter(fun) |> MyModule.length()")
+      assert_style("a |> Enum.filter(fun) |> length(arg)")
+    end
+
+    test "filter/length followed by a comparison" do
+      assert_style(
+        """
+        defp has_multiple_transcript_fields?(fields) do
+          fields
+          |> Enum.filter(fn field -> field.source == :variable and field.variable == "transcript" end)
+          |> length()
+          |> Kernel.>(1)
+        end
+        """,
+        """
+        defp has_multiple_transcript_fields?(fields) do
+          Enum.count(fields, fn field -> field.source == :variable and field.variable == "transcript" end) > 1
+        end
+        """
+      )
+    end
+
     test "drop/take => slice" do
       # single pipes collapse to a function call
       assert_style(
@@ -1621,6 +1668,146 @@ defmodule Quokka.Style.PipesTest do
 
       assert_style("items |> Enum.map(mapper) |> Enum.sum()")
       assert_style("mapping |> Map.values() |> Enum.sum_by(mapper)")
+    end
+
+    test "zip/map rewrites to zip_with with a capture when the body just calls a function" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style(
+        """
+        results
+        |> Enum.zip(refs)
+        |> Enum.map(fn {result, ref} -> email_result(result, ref) end)
+        """,
+        "Enum.zip_with(results, refs, &email_result/2)"
+      )
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, y} -> Mod.fun(x, y) end)",
+        "Enum.zip_with(a, b, &Mod.fun/2)"
+      )
+    end
+
+    test "zip/map rewrites to zip_with with a two-arity fn otherwise" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, y} -> x + y end)",
+        "Enum.zip_with(a, b, fn x, y -> x + y end)"
+      )
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, y} -> match?(x, y) end)",
+        "Enum.zip_with(a, b, fn x, y -> match?(x, y) end)"
+      )
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, y} -> f(y, x) end)",
+        "Enum.zip_with(a, b, fn x, y -> f(y, x) end)"
+      )
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, y} -> f(x, y, 1) end)",
+        "Enum.zip_with(a, b, fn x, y -> f(x, y, 1) end)"
+      )
+
+      assert_style(
+        "a |> Enum.zip(b) |> Enum.map(fn {x, x} -> f(x, x) end)",
+        "Enum.zip_with(a, b, fn x, x -> f(x, x) end)"
+      )
+
+      assert_style(
+        """
+        a
+        |> Enum.zip(b)
+        |> Enum.map(fn
+          {x, nil} when is_integer(x) -> x
+          {_, y} -> y
+        end)
+        """,
+        """
+        Enum.zip_with(a, b, fn
+          x, nil when is_integer(x) -> x
+          _, y -> y
+        end)
+        """
+      )
+    end
+
+    test "zip/map rewrites within a longer pipe chain" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style(
+        """
+        a
+        |> foo()
+        |> Enum.zip(b)
+        |> Enum.map(fn {x, y} -> f(x, y) end)
+        |> bar()
+        """,
+        """
+        a
+        |> foo()
+        |> Enum.zip_with(b, &f/2)
+        |> bar()
+        """
+      )
+    end
+
+    test "zip/map preserves a multiline mapper and its comments" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style(
+        """
+        results
+        |> foo()
+        |> Enum.zip(refs)
+        |> Enum.map(fn {result, ref} ->
+          # build the result
+          x = email_result(result, ref)
+          y(x)
+        end)
+        |> bar()
+        """,
+        """
+        results
+        |> foo()
+        |> Enum.zip_with(refs, fn result, ref ->
+          # build the result
+          x = email_result(result, ref)
+          y(x)
+        end)
+        |> bar()
+        """
+      )
+    end
+
+    test "zip/map leaves mappers it can't safely rewrite alone" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+
+      assert_style("a |> Enum.zip(b) |> Enum.map(&f/1)")
+      assert_style("a |> Enum.zip(b) |> Enum.map(fn pair -> f(pair) end)")
+      assert_style("a |> Enum.zip(b) |> Enum.map(fn {x, y, z} -> f(x, y, z) end)")
+      assert_style("a |> Enum.zip(b) |> Enum.map(mapper)")
+      assert_style("a |> Stream.zip(b) |> Enum.map(fn {x, y} -> f(x, y) end)")
+      assert_style("a |> Enum.zip(b) |> Stream.map(fn {x, y} -> f(x, y) end)")
+      assert_style("a |> Enum.zip() |> Enum.map(fn {x, y} -> f(x, y) end)")
+      assert_style("[[1, 2], [3, 4], [5, 6]] |> Enum.zip() |> Enum.map(fn {x, y, z} -> f(x, y) end)")
+
+      assert_style("""
+      a
+      |> Enum.zip(b)
+      |> Enum.map(fn
+        {x, y} -> f(x, y)
+        pair -> pair
+      end)
+      """)
+    end
+
+    test "zip/map respects the inefficient_functions exclusion" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> false end)
+
+      assert_style("a |> Enum.zip(b) |> Enum.map(fn {x, y} -> f(x, y) end)")
     end
 
     test "map/sum preserves results for numeric mapper outputs" do
