@@ -115,6 +115,22 @@ defmodule Quokka.Style.SingleNode do
     end
   end
 
+  # The mapper disappears in this rewrite, so move its comments above the resulting call.
+  def run(
+        {{{:., _, [{:__aliases__, _, [:Map]}, :new]}, _,
+          [{{:., _, [{:__aliases__, _, [:Enum]}, :group_by]}, _, [_, _]}, mapper]} = node, meta},
+        ctx
+      ) do
+    styled = style(node)
+
+    comments =
+      if styled == node,
+        do: ctx.comments,
+        else: Style.move_comments_before(ctx.comments, mapper, Style.statement_line({node, meta}))
+
+    {:cont, {styled, meta}, %{ctx | comments: comments}}
+  end
+
   def run({node, meta}, ctx), do: {:cont, {style(node), meta}, ctx}
 
   # True when the focused node is the right-hand side of a pipe (`lhs |> focused`).
@@ -257,7 +273,18 @@ defmodule Quokka.Style.SingleNode do
   # Enum.into(enum, empty_map[, ...]) => Map.new(enum[, ...])
   defp style({{:., _, [{:__aliases__, _, [:Enum]}, :into]} = into, m, [enum, collectable | rest]} = node) do
     if replacement = replace_into(into, collectable, rest),
-      do: {replacement, m, [enum | rest]},
+      do: style({replacement, m, [enum | rest]}),
+      else: node
+  end
+
+  # Map.new(Enum.map(enum, mapper)) => Map.new(enum, mapper)
+  defp style(
+         {{:., _, [{_, _, [collectable]}, :new]} = new, m, [{{:., _, [{_, _, [enum]}, :map]}, mm, [items, mapper]}]} =
+           node
+       )
+       when collectable in [:Map, :Keyword, :MapSet] and enum in [:Enum, :Stream] do
+    if Quokka.Config.inefficient_function_rewrites?(),
+      do: {new, Keyword.put(mm, :line, m[:line]), [items, mapper]},
       else: node
   end
 
@@ -429,6 +456,16 @@ defmodule Quokka.Style.SingleNode do
   # `Enum.reverse(foo) ++ bar` => `Enum.reverse(foo, bar)`
   defp style({:++, _, [{{:., _, [{_, _, [:Enum]}, :reverse]} = reverse, r_meta, [lhs]}, rhs]}),
     do: {reverse, r_meta, [lhs, rhs]}
+
+  # `Map.new(Enum.group_by(enum, key_fun), fn {k, v} -> {k, length(v)} end)` => `Enum.frequencies_by(enum, key_fun)`
+  defp style(
+         {{:., _, [{:__aliases__, _, [:Map]}, :new]}, _,
+          [{{:., dm, [{:__aliases__, _, [:Enum]} = enum, :group_by]}, gm, [_, _] = args}, mapper]} = node
+       ) do
+    if Quokka.Config.inefficient_function_rewrites?() and Style.group_counting_mapper?(mapper),
+      do: {{:., dm, [enum, :frequencies_by]}, gm, args},
+      else: node
+  end
 
   # `Enum.sum(Enum.map(enum, mapper))` => `Enum.sum_by(enum, mapper)`
   # `Enum.product(Enum.map(enum, mapper))` => `Enum.product_by(enum, mapper)`

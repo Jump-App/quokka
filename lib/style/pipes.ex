@@ -32,6 +32,8 @@ defmodule Quokka.Style.Pipes do
   alias Quokka.Style
   alias Quokka.Zipper
 
+  require Quokka.Style
+
   @collectable [:Map, :Keyword, :MapSet]
   @enum [:Enum, :Stream]
   @uncapturable Enum.uniq(Keyword.keys(Kernel.SpecialForms.__info__(:macros)) ++ Keyword.keys(Kernel.__info__(:macros)))
@@ -68,9 +70,12 @@ defmodule Quokka.Style.Pipes do
   def run({{:|>, _, _}, _} = zipper, ctx) do
     case fix_pipe_start(zipper) do
       {{:|>, _, _}, _} = zipper ->
-        zipper =
-          Zipper.traverse(zipper, fn {node, meta} ->
-            {node |> fix_pipe() |> maybe_break_one_pipe_per_line(), meta}
+        statement_line = Style.statement_line(zipper)
+
+        {zipper, ctx} =
+          Zipper.traverse(zipper, ctx, fn {node, meta}, ctx ->
+            {node, ctx} = fix_pipe(node, ctx, statement_line)
+            {{maybe_break_one_pipe_per_line(node), meta}, ctx}
           end)
 
         case maybe_fold_two_step_infix(zipper) do
@@ -373,15 +378,32 @@ defmodule Quokka.Style.Pipes do
     end
   end
 
-  defguardp is_length(fun)
-            when fun == :length or
-                   (elem(fun, 0) == :. and elem(hd(elem(fun, 2)), 2) == [:Kernel] and tl(elem(fun, 2)) == [:length])
-
   # `pipe_chain(a, b, c)` generates the ast for `a |> b |> c`
   # the intention is to make it a little easier to see what the fix_pipe functions are matching on =)
   defmacrop pipe_chain(pm, a, b, c) do
     quote do: {:|>, _, [{:|>, unquote(pm), [unquote(a), unquote(b)]}, unquote(c)]}
   end
+
+  # `lhs |> Enum.group_by(key_fun) |> Map.new(fn {k, v} -> {k, length(v)} end)` => `lhs |> Enum.frequencies_by(key_fun)`
+  defp fix_pipe(
+         pipe_chain(
+           pm,
+           lhs,
+           {{:., dm, [{_, _, [:Enum]} = enum, :group_by]}, gm, [key_fun]},
+           {{:., _, [{_, _, [:Map]}, :new]}, _, [mapper]}
+         ) = node,
+         ctx,
+         statement_line
+       ) do
+    if Quokka.Config.inefficient_function_rewrites?() and Style.group_counting_mapper?(mapper) do
+      comments = Style.move_comments_before(ctx.comments, mapper, statement_line)
+      {{:|>, pm, [lhs, {{:., dm, [enum, :frequencies_by]}, gm, [key_fun]}]}, %{ctx | comments: comments}}
+    else
+      {node, ctx}
+    end
+  end
+
+  defp fix_pipe(node, ctx, _statement_line), do: {fix_pipe(node), ctx}
 
   # a |> fun => a |> fun()
   # recurses so that other rewrites see the parenthesized call in a single pass
@@ -478,7 +500,7 @@ defmodule Quokka.Style.Pipes do
   # `lhs |> Enum.filter(filterer) |> length()` => `lhs |> Enum.count(filterer)`
   # `lhs |> Enum.filter(filterer) |> Kernel.length()` => `lhs |> Enum.count(filterer)`
   defp fix_pipe(pipe_chain(pm, lhs, {{:., dm, [{_, _, [:Enum]} = enum, :filter]}, meta, [filterer]}, {length, _, []}))
-       when is_length(length) do
+       when Style.is_length(length) do
     {:|>, pm, [lhs, {{:., dm, [enum, :count]}, [line: meta[:line]], [filterer]}]}
   end
 
@@ -718,23 +740,27 @@ defmodule Quokka.Style.Pipes do
            lhs,
            {{:., dm, [{_, _, [mod]}, :map]}, em, [mapper]},
            {{:., _, [{_, _, [:Enum]}, :into]} = into, _, [collectable]}
-         )
+         ) = node
        )
        when mod in @enum do
-    rhs =
-      case collectable do
-        {{:., _, [{_, _, [mod]}, :new]}, _, []} when mod in @collectable ->
-          {{:., dm, [{:__aliases__, dm, [mod]}, :new]}, em, [mapper]}
+    if Quokka.Config.inefficient_function_rewrites?() do
+      rhs =
+        case collectable do
+          {{:., _, [{_, _, [mod]}, :new]}, _, []} when mod in @collectable ->
+            {{:., dm, [{:__aliases__, dm, [mod]}, :new]}, em, [mapper]}
 
-        {:%{}, _, []} ->
-          {{:., dm, [{:__aliases__, dm, [:Map]}, :new]}, em, [mapper]}
+          {:%{}, _, []} ->
+            {{:., dm, [{:__aliases__, dm, [:Map]}, :new]}, em, [mapper]}
 
-        _ ->
-          {into, m, [collectable]} = Style.set_line({into, em, [collectable]}, dm[:line])
-          {into, m, [collectable, mapper]}
-      end
+          _ ->
+            {into, m, [collectable]} = Style.set_line({into, em, [collectable]}, dm[:line])
+            {into, m, [collectable, mapper]}
+        end
 
-    {:|>, pm, [lhs, rhs]}
+      {:|>, pm, [lhs, rhs]}
+    else
+      node
+    end
   end
 
   # `lhs |> Enum.map(mapper) |> Map.new()` => `lhs |> Map.new(mapper)`
@@ -744,10 +770,12 @@ defmodule Quokka.Style.Pipes do
            lhs,
            {{:., _, [{_, _, [enum]}, :map]}, em, [mapper]},
            {{:., _, [{_, _, [mod]}, :new]} = new, _, []}
-         )
+         ) = node
        )
        when mod in @collectable and enum in @enum do
-    {:|>, pm, [lhs, {Style.set_line(new, em[:line]), em, [mapper]}]}
+    if Quokka.Config.inefficient_function_rewrites?(),
+      do: {:|>, pm, [lhs, {Style.set_line(new, em[:line]), em, [mapper]}]},
+      else: node
   end
 
   # When a `Kernel` operator is the first function in a pipe, fold it back into an inline

@@ -189,6 +189,22 @@ Note that all of the examples below also apply to pipes (`enum |> Enum.into(...)
 | `Enum.into(enum, [])`                      | `Enum.to_list(enum)`                |
 | `Enum.into(enum, [], mapper)`              | `Enum.map(enum, mapper)`            |
 
+### `X.new(Enum.map(enum, mapper))` -> `X.new(enum, mapper)`
+
+`Map.new/2`, `Keyword.new/2` and `MapSet.new/2` take a mapper, so there's no need to build an intermediate list with `Enum.map/2` (or `Stream.map/2`) first. The piped form (`enum |> Enum.map(mapper) |> Map.new()`) is covered in [Pipe Chains](pipes.md#piped-function-optimizations).
+
+| Before                                     | After                         |
+| ------------------------------------------ | ----------------------------- |
+| `Map.new(Enum.map(enum, mapper))`          | `Map.new(enum, mapper)`       |
+| `Keyword.new(Enum.map(enum, mapper))`      | `Keyword.new(enum, mapper)`   |
+| `MapSet.new(Stream.map(enum, mapper))`     | `MapSet.new(enum, mapper)`    |
+| `Enum.into(Enum.map(enum, mapper), %{})`   | `Map.new(enum, mapper)`       |
+| `Enum.into(Stream.map(enum, mapper), MapSet.new())` | `MapSet.new(enum, mapper)` |
+
+The `Enum.into/2` forms are fully rewritten in one formatting pass.
+
+Both the nested and piped forms respect `exclude: [:inefficient_functions]`.
+
 ### Map/Keyword.merge w/ single key literal -> X.put
 
 `Keyword.merge` and `Map.merge` called with a literal map or keyword argument with a single key are rewritten to the equivalent `put`, a cognitively simpler function.
@@ -279,6 +295,31 @@ Enum.sum_by(groups, fn group -> length(group.rows) end)
 Enum.product(Enum.map(groups, fn group -> length(group.rows) end))
 # Styled
 Enum.product_by(groups, fn group -> length(group.rows) end)
+```
+
+### `Enum.group_by/2` and counting groups -> `Enum.frequencies_by/2`
+
+When `Map.new/2` only replaces each group from `Enum.group_by/2` with its size, Quokka rewrites
+the pair to `Enum.frequencies_by/2`, which counts without building the intermediate lists.
+The collector must keep the key unchanged and pair it with `length(group)`, `Kernel.length(group)`, or `Enum.count(group)`.
+Collectors that inspect or transform the group, and `Enum.group_by/3`, are left alone.
+
+This rewrite assumes the key function is pure and does not depend on invocation order.
+`Enum.group_by/2` invokes it in reverse input order, while `Enum.frequencies_by/2` invokes it
+in forward input order.
+
+```elixir
+# Before
+seats
+|> Enum.group_by(& &1.product_id)
+|> Map.new(fn {product_id, seats} -> {product_id, length(seats)} end)
+# Styled
+Enum.frequencies_by(seats, & &1.product_id)
+
+# Before
+Map.new(Enum.group_by(seats, & &1.product_id), fn {id, group} -> {id, Enum.count(group)} end)
+# Styled
+Enum.frequencies_by(seats, & &1.product_id)
 ```
 
 ### `Enum.reduce` rewrites to purpose-built functions

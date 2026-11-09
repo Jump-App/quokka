@@ -791,6 +791,85 @@ defmodule Quokka.Style.SingleNodeTest do
     end
   end
 
+  describe "nested Enum.map in $collectable.new" do
+    test "respects inefficient_functions config" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> false end)
+
+      for enum <- ["Enum", "Stream"] do
+        assert_style("Enum.into(#{enum}.map(items, mapper), %{})")
+
+        for collectable <- ["Map", "Keyword", "MapSet"] do
+          assert_style("#{collectable}.new(#{enum}.map(items, mapper))")
+          assert_style("Enum.into(#{enum}.map(items, mapper), #{collectable}.new())")
+        end
+      end
+    end
+
+    test "folds the mapper into the collectable constructor" do
+      for collectable <- ["Map", "Keyword", "MapSet"], enum <- ["Enum", "Stream"] do
+        assert_style("#{collectable}.new(#{enum}.map(items, mapper))", "#{collectable}.new(items, mapper)")
+      end
+    end
+
+    test "folds Enum.into and its nested mapper in one pass" do
+      for enum <- ["Enum", "Stream"] do
+        assert_style("Enum.into(#{enum}.map(items, mapper), %{})", "Map.new(items, mapper)")
+
+        for collectable <- ["Map", "Keyword", "MapSet"] do
+          assert_style(
+            "Enum.into(#{enum}.map(items, mapper), #{collectable}.new())",
+            "#{collectable}.new(items, mapper)"
+          )
+        end
+      end
+    end
+
+    test "preserves comments before the nested mapper" do
+      for collectable <- ["Map", "Keyword", "MapSet"], enum <- ["Enum", "Stream"] do
+        assert_style(
+          """
+          #{collectable}.new(
+            # index by id
+            #{enum}.map(users, &{&1.id, &1})
+          )
+          """,
+          """
+          #{collectable}.new(
+            # index by id
+            users,
+            &{&1.id, &1}
+          )
+          """
+        )
+      end
+    end
+
+    test "multiline anonymous mapper" do
+      assert_style(
+        """
+        Map.new(
+          Enum.map(owner_emails, fn job ->
+            email = decode_email(job)
+            {List.first(email.to), email}
+          end)
+        )
+        """,
+        """
+        Map.new(owner_emails, fn job ->
+          email = decode_email(job)
+          {List.first(email.to), email}
+        end)
+        """
+      )
+    end
+
+    test "leaves other shapes alone" do
+      assert_style("Map.new(Enum.map(items, mapper), other)")
+      assert_style("Map.new(Enum.filter(items, filterer))")
+      assert_style("Map.new(Foo.map(items, mapper))")
+    end
+  end
+
   describe "Enum.into and $collectable.new" do
     test "into an empty map" do
       assert_style("Enum.into(a, %{})", "Map.new(a)")
@@ -1631,6 +1710,77 @@ defmodule Quokka.Style.SingleNodeTest do
       stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
       assert_style("Enum.reduce(enum, 0, fn x, acc -> x + acc end)", "Enum.sum(enum)")
       assert_style("enum |> Enum.reduce(0, &+/2)", "enum |> Enum.sum()")
+    end
+  end
+
+  describe "Map.new(Enum.group_by(...), counter) => Enum.frequencies_by" do
+    setup do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> true end)
+      :ok
+    end
+
+    test "rewrites nested group_by and Map.new calls" do
+      assert_style(
+        "Map.new(Enum.group_by(seats, & &1.product_id), fn {product_id, seats} -> {product_id, length(seats)} end)",
+        "Enum.frequencies_by(seats, & &1.product_id)"
+      )
+
+      assert_style(
+        "Map.new(Enum.group_by(seats, &key/1), fn {k, v} -> {k, Enum.count(v)} end)",
+        "Enum.frequencies_by(seats, &key/1)"
+      )
+    end
+
+    test "recognizes Kernel.length" do
+      assert_style(
+        "Map.new(Enum.group_by(seats, & &1.product_id), fn {k, v} -> {k, Kernel.length(v)} end)",
+        "Enum.frequencies_by(seats, & &1.product_id)"
+      )
+    end
+
+    test "preserves comments in a multiline mapper" do
+      assert_style(
+        """
+        Map.new(Enum.group_by(seats, & &1.product_id), fn {k, v} ->
+          # note
+          {k, length(v)}
+        end)
+        """,
+        """
+        # note
+        Enum.frequencies_by(seats, & &1.product_id)
+        """
+      )
+    end
+
+    test "moves mapper comments above an assignment" do
+      assert_style(
+        """
+        counts =
+          Map.new(Enum.group_by(seats, & &1.product_id), fn {k, v} ->
+            # note
+            {k, length(v)}
+          end)
+        """,
+        """
+        # note
+        counts =
+          Enum.frequencies_by(seats, & &1.product_id)
+        """
+      )
+    end
+
+    test "leaves collectors that do more than count alone" do
+      assert_style("Map.new(Enum.group_by(seats, & &1.id), fn {k, v} -> {k, length(v) * 2} end)")
+      assert_style("Map.new(Enum.group_by(seats, & &1.id), fn {k, v} -> {k, Enum.count(v, & &1.active)} end)")
+      assert_style("Map.new(Enum.group_by(seats, & &1.id), fn {k, v} -> {to_string(k), length(v)} end)")
+      assert_style("Map.new(Enum.group_by(seats, & &1.id, & &1.name), fn {k, v} -> {k, length(v)} end)")
+    end
+
+    test "respects the inefficient_functions exclusion" do
+      stub(Quokka.Config, :inefficient_function_rewrites?, fn -> false end)
+
+      assert_style("Map.new(Enum.group_by(seats, & &1.id), fn {k, v} -> {k, length(v)} end)")
     end
   end
 
